@@ -12,6 +12,8 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import org.opensearch.action.bulk.BulkRequest;
+import org.opensearch.action.bulk.BulkResponse;
 import org.opensearch.action.index.IndexRequest;
 import org.opensearch.action.index.IndexResponse;
 import org.opensearch.client.RequestOptions;
@@ -127,6 +129,9 @@ public class OpenSearchConsumer {
                 final int recordCount = records.count();
                 log.info("Recv " + recordCount + " record(s).");
 
+                // - 대량 요청하기 (객체 생성)
+                BulkRequest bulkRequest = new BulkRequest();
+
                 // send to openSearch (record 하나씩 보내기)
                 for (ConsumerRecord<String, String> record : records) {
                     log.debug("+ record = " + record.value() + ", partition = " + record.partition() + ", topic = " + record.topic());
@@ -145,16 +150,30 @@ public class OpenSearchConsumer {
                                 .source(record.value(), XContentType.JSON)
                                 .id(id);
 
-                        final IndexResponse response = openSearchClient.index(indexRequest, RequestOptions.DEFAULT);
-                        log.info("Inserted 1 document into OpenSearch ID = " + response.getId());
+                        // - 대량 요청하기 (indexRequest 쌓기)
+//                        final IndexResponse response = openSearchClient.index(indexRequest, RequestOptions.DEFAULT);
+//                        log.info("Inserted 1 document into OpenSearch ID = " + response.getId());
+                        bulkRequest.add(indexRequest);
                     } catch (Exception e) {
                         log.error("Error = " + e);
                     }
                 }
+                // - 대량 요청하기 (openSearch 보내기)
+                if (0 < bulkRequest.numberOfActions()) {
+                    final BulkResponse bulkResponse = openSearchClient.bulk(bulkRequest, RequestOptions.DEFAULT);
+                    log.info("Inserted " + bulkResponse.getItems().length + " record(s).");
 
-                // commit offsets after the batch is consumed -> at least once 방법.
-                consumer.commitSync();
-                log.info("Offsets have been committed!");
+                    // 지연을 추가해 대량 작업 수행하게 하기.
+                    try {
+                        Thread.sleep(1000);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+
+                    // commit offsets after the batch is consumed -> at least once 방법.
+                    consumer.commitSync();
+                    log.info("Offsets have been committed!");
+                }
             }
         }
 
