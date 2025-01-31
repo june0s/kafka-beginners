@@ -1,5 +1,6 @@
 package io.conduktor.demos.kafka.opensearch;
 
+import com.google.gson.JsonParser;
 import org.apache.http.HttpHost;
 import org.apache.http.auth.AuthScope;
 import org.apache.http.auth.UsernamePasswordCredentials;
@@ -80,6 +81,16 @@ public class OpenSearchConsumer {
         return new KafkaConsumer<>(properties);
     }
 
+    private static String extractId(String json) {
+
+        return JsonParser.parseString(json)
+                .getAsJsonObject()
+                .get("meta")
+                .getAsJsonObject()
+                .get("id")
+                .getAsString();
+    }
+
     public static void main(String[] args) throws URISyntaxException, IOException {
         Logger log = LoggerFactory.getLogger(OpenSearchConsumer.class.getSimpleName());
 
@@ -119,8 +130,19 @@ public class OpenSearchConsumer {
                 for (ConsumerRecord<String, String> record : records) {
                     log.debug("+ record = " + record.value() + ", partition = " + record.partition() + ", topic = " + record.topic());
                     try {
+                        // 멱등 전략 1
+                        // define an ID using Kafka Record coordinates
+//                        String id = record.topic()  + "_" + record.partition() + "_" + record.offset();
+
+                        // 멱등 전략 2
+                        // wikimedia json meta 데이터에 있는 id 를 사용.
+                        // id가 중복되면, opensearch 가 해당 id 값을 덮어쓴다.
+                        String id = extractId(record.value());
+
                         // send to record into openSearch
-                        final IndexRequest indexRequest = new IndexRequest(index).source(record.value(), XContentType.JSON);
+                        final IndexRequest indexRequest = new IndexRequest(index)
+                                .source(record.value(), XContentType.JSON)
+                                .id(id);
 
                         final IndexResponse response = openSearchClient.index(indexRequest, RequestOptions.DEFAULT);
                         log.info("Inserted 1 document into OpenSearch ID = " + response.getId());
