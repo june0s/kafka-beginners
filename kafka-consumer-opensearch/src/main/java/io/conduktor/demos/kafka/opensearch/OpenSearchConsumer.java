@@ -76,6 +76,7 @@ public class OpenSearchConsumer {
         properties.setProperty(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         properties.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         properties.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
+        properties.setProperty(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false"); // 저동 커밋 비활성화.
 
         // create the Consumer
         return new KafkaConsumer<>(properties);
@@ -150,6 +151,10 @@ public class OpenSearchConsumer {
                         log.error("Error = " + e);
                     }
                 }
+
+                // commit offsets after the batch is consumed -> at least once 방법.
+                consumer.commitSync();
+                log.info("Offsets have been committed!");
             }
         }
 
