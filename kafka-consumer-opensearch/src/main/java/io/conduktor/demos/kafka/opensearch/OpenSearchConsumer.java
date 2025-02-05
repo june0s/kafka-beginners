@@ -11,6 +11,7 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.common.errors.WakeupException;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.opensearch.action.bulk.BulkRequest;
 import org.opensearch.action.bulk.BulkResponse;
@@ -78,7 +79,7 @@ public class OpenSearchConsumer {
         properties.setProperty(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         properties.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         properties.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
-        properties.setProperty(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false"); // 저동 커밋 비활성화.
+        properties.setProperty(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false"); // 자동 커밋 비활성화.
 
         // create the Consumer
         return new KafkaConsumer<>(properties);
@@ -104,6 +105,23 @@ public class OpenSearchConsumer {
 
         // create our kafka client
         final KafkaConsumer<String, String> consumer = createKafkaConsumer();
+
+        // get a reference to the main thread
+        final Thread mainThread = Thread.currentThread();
+
+        // adding the shutdown hook
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            log.info("Detected a shutdown, let's exit by calling consumer.wakeup()...");
+            consumer.wakeup();
+
+            // join the main thread to allow the execution of the code in the main thread
+            // main 스레드가 wakeup 예외를 처리하고 종료될 수 있도록 mainThread 에 join 하고 기다린다.
+            try {
+                mainThread.join();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }));
 
         // try 문에 openSearchClient를 전달하면, openSearchClient.close() 가 호출된다고 한다. java magic!
         try (openSearchClient; consumer) {
@@ -154,6 +172,8 @@ public class OpenSearchConsumer {
 //                        final IndexResponse response = openSearchClient.index(indexRequest, RequestOptions.DEFAULT);
 //                        log.info("Inserted 1 document into OpenSearch ID = " + response.getId());
                         bulkRequest.add(indexRequest);
+                        log.info("Added 1 document into bulkRequest ID = " + id);
+
                     } catch (Exception e) {
                         log.error("Error = " + e);
                     }
@@ -175,12 +195,14 @@ public class OpenSearchConsumer {
                     log.info("Offsets have been committed!");
                 }
             }
+        } catch (WakeupException e) {
+            log.info("Consumer is starting to shut down");
+        } catch (Exception e) {
+            log.error("Unexpected exception in the consumer ", e);
+        } finally {
+            consumer.close(); // close the consumer, this will also commit offsets
+            openSearchClient.close();
+            log.info("The consumer is now gracefully shut down~");
         }
-
-        // create our Kafka client
-
-        // main code logic
-
-        // close things
     }
 }
